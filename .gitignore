@@ -1,0 +1,38 @@
+# React
+node_modules/
+dist/
+
+# Python / Streamlit（このリポジトリはReact版専用）
+app.py
+requirements.txt
+runtime.txt
+.python-version
+.streamlit/
+Procfile
+render.yaml
+railway.toml
+nixpacks.toml
+start.sh
+src/__init__.py
+src/claude_client.py
+src/config.py
+src/data_fetcher.py
+src/database.py
+src/indicator_manager.py
+src/signal_logic.py
+scripts/
+data/
+
+# 環境変数・ログ
+.env
+.env.local
+*.log
+
+# その他
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+.idea/
+.vscode/
