@@ -9,7 +9,6 @@ runtime.txt
 .python-version
 .streamlit/
 Procfile
-render.yaml
 railway.toml
 nixpacks.toml
 start.sh
