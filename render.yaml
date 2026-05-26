@@ -1,7 +1,7 @@
 services:
   - type: web
     name: etf-screener-app
-    env: docker
-    dockerfilePath: ./Dockerfile
-    plan: free
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
     pullRequestPreviewsEnabled: false
