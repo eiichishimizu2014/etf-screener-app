@@ -1,80 +1,5 @@
 import { useState, useEffect } from "react";
 
-// ── Yahoo Finance Chart API からリアルタイムデータ取得 ────────────────
-function _rsi(closes) {
-  const period = 14;
-  if (closes.length < period + 1) return null;
-  const deltas = closes.slice(1).map((c, i) => c - closes[i]);
-  const tail = deltas.slice(-period);
-  const avgGain = tail.filter(d => d > 0).reduce((a, b) => a + b, 0) / period;
-  const avgLoss = tail.filter(d => d < 0).reduce((a, b) => a + Math.abs(b), 0) / period;
-  if (avgLoss === 0) return 100;
-  return parseFloat((100 - 100 / (1 + avgGain / avgLoss)).toFixed(1));
-}
-
-function _tr(highs, lows, closes, i) {
-  return Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
-}
-
-function _meanATR(highs, lows, closes, start, end) {
-  const trs = [];
-  for (let i = Math.max(1, start); i < end; i++) trs.push(_tr(highs, lows, closes, i));
-  return trs.length ? trs.reduce((a, b) => a + b) / trs.length : null;
-}
-
-async function fetchYahooData(ticker) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=3mo&interval=1d`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-
-  const result = json.chart?.result?.[0];
-  if (!result) throw new Error("データなし");
-
-  const meta = result.meta;
-  const q = result.indicators.quote[0];
-  const rows = result.timestamp
-    .map((_, i) => ({ c: q.close[i], h: q.high[i], l: q.low[i], v: q.volume[i] }))
-    .filter(d => d.c != null && d.h != null && d.l != null);
-
-  if (rows.length < 26) throw new Error("データ不足");
-
-  const closes  = rows.map(d => d.c);
-  const highs   = rows.map(d => d.h);
-  const lows    = rows.map(d => d.l);
-  const volumes = rows.map(d => d.v || 0);
-  const n = closes.length;
-
-  const price    = parseFloat(closes[n - 1].toFixed(2));
-  const change   = parseFloat(((closes[n - 1] - closes[n - 2]) / closes[n - 2] * 100).toFixed(2));
-  const ma25     = parseFloat((closes.slice(-25).reduce((a, b) => a + b) / 25).toFixed(2));
-  const rsi      = _rsi(closes.slice(-15));
-  const atr14    = _meanATR(highs, lows, closes, n - 14, n);
-  const baseline = _meanATR(highs, lows, closes, n - 44, n - 14);
-  const atrRatio = atr14 && baseline ? parseFloat((atr14 / baseline).toFixed(2)) : 1.0;
-  const avgVol20 = volumes.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
-  const volRatio = parseFloat((volumes[n - 1] / (avgVol20 || 1)).toFixed(2));
-
-  const rsiOk = rsi != null && rsi >= 30 && rsi <= 75;
-  const atrOk = atrRatio <= 1.5;
-  const volOk = volRatio >= 1.0;
-
-  let signal;
-  if (price > ma25 && rsiOk && atrOk && volOk) signal = "entry";
-  else if (price > ma25)                        signal = "entry_fail";
-  else                                          signal = "ma_exit";
-
-  return {
-    ticker:   ticker.toUpperCase(),
-    name:     meta.shortName || meta.longName || ticker,
-    currency: meta.currency || (ticker.endsWith(".T") ? "JPY" : "USD"),
-    price, change, ma25, rsi, atrRatio, volRatio, signal,
-    filters:  { rsi: rsiOk, atr: atrOk, vol: volOk },
-    updated:  new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }),
-    error:    null,
-  };
-}
-
 // ── 初期監視リスト（ポジション情報のみ保持） ─────────────────────────
 const INITIAL_TICKERS = [
   { ticker: "BBAI", position: null },
@@ -459,7 +384,7 @@ export default function App() {
 
   const loadTicker = async (ticker) => {
     try {
-      const data = await fetchYahooData(ticker);
+      const data = await fetch(`/api/quote/${ticker}`).then(r => r.json());
       setWatchlist(prev =>
         prev.map(w => w.ticker === ticker
           ? { ...w, ...data, position: w.position, type: "stock" }
