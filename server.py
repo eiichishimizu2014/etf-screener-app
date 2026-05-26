@@ -25,9 +25,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# TTL キャッシュ (5分)
+# TTL キャッシュ: テクニカル 5分 / ファンダメンタルズ 1時間
 _CACHE: dict[str, tuple[dict, float]] = {}
 _CACHE_TTL = 300
+
+_MOAT_CACHE: dict[str, tuple[dict, float]] = {}
+_MOAT_TTL = 3600
 
 
 def _cached(ticker: str) -> dict | None:
@@ -142,6 +145,78 @@ async def get_quote(ticker: str):
     except Exception:
         logger.exception("%s: 取得エラー", ticker)
         return {"ticker": ticker, "signal": "loading", "error": "取得失敗"}
+
+
+@app.get("/api/moat/{ticker}")
+async def get_moat(ticker: str):
+    """ファンダメンタルズから堀の侵食度・信号・ニュースを返す (TTL 1時間)."""
+    ticker = ticker.upper().strip()
+    if cached := _MOAT_CACHE.get(ticker):
+        if time.monotonic() - cached[1] < _MOAT_TTL:
+            return cached[0]
+
+    try:
+        t = yf.Ticker(ticker)
+        info = t.get_info() if hasattr(t, "get_info") else t.info
+
+        gross_margin   = info.get("grossMargins")    or 0.0
+        rev_growth     = info.get("revenueGrowth")   or 0.0
+        op_margin      = info.get("operatingMargins") or 0.0
+        rec            = info.get("recommendationMean") or 3.0
+        short_pct      = info.get("shortPercentOfFloat") or 0.0
+        roe            = info.get("returnOnEquity")  or 0.0
+
+        # 侵食度スコア (0–100)
+        erosion = 0
+        if gross_margin < 0.2:   erosion += 20
+        elif gross_margin < 0.4: erosion += 10
+        if rev_growth < -0.05:   erosion += 25
+        elif rev_growth < 0.05:  erosion += 10
+        if op_margin < -0.2:     erosion += 20
+        elif op_margin < 0:      erosion += 10
+        if rec >= 3.5:           erosion += 20
+        elif rec >= 2.5:         erosion += 5
+        if short_pct > 0.2:      erosion += 15
+        elif short_pct > 0.1:    erosion += 5
+        erosion = min(100, erosion)
+
+        alert = "red" if erosion >= 60 else "yellow" if erosion >= 30 else "green"
+
+        # 最新ニュースタイトル
+        news_title = ""
+        try:
+            articles = t.news or []
+            if articles:
+                news_title = articles[0].get("title", "")
+        except Exception:
+            pass
+
+        # 堀の説明 (フォールバック: 業種)
+        moat_fallback = info.get("industry") or info.get("sector") or ticker
+
+        data = {
+            "ticker":  ticker,
+            "name":    info.get("longName") or info.get("shortName") or ticker,
+            "moat":    moat_fallback,
+            "alert":   alert,
+            "erosion": erosion,
+            "news":    news_title,
+            "metrics": {
+                "grossMargin":      round(gross_margin * 100, 1) if gross_margin else None,
+                "revenueGrowth":    round(rev_growth   * 100, 1) if rev_growth   else None,
+                "operatingMargin":  round(op_margin    * 100, 1) if op_margin    else None,
+                "recommendation":   round(rec, 1),
+                "shortPct":         round(short_pct    * 100, 1) if short_pct    else None,
+                "roe":              round(roe           * 100, 1) if roe          else None,
+            },
+        }
+        _MOAT_CACHE[ticker] = (data, time.monotonic())
+        return data
+
+    except Exception:
+        logger.exception("%s: moat 取得エラー", ticker)
+        return {"ticker": ticker, "alert": "yellow", "erosion": None,
+                "news": "取得失敗", "metrics": {}}
 
 
 # React の dist を配信 (本番のみ)

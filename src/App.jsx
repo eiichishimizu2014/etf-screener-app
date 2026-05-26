@@ -8,12 +8,13 @@ const INITIAL_TICKERS = [
   { ticker: "SOUN", position: { entryPrice: 10.50, shares: 200, entryDate: "2026-05-05", holdDays: 14 } },
 ];
 
-const MOCK_MOAT = [
-  { ticker: "BBAI", name: "BigBear.ai", moat: "政府・国防のセキュリティ認定", alert: "green", erosion: 18, news: "米空軍との新契約を締結。堀は健在。" },
-  { ticker: "PATH", name: "UiPath", moat: "レガシーシステムへの深い統合", alert: "yellow", erosion: 45, news: "MicrosoftがPower Automateの機能強化を発表。要注意。" },
-  { ticker: "AI",   name: "C3.ai",    moat: "重工業・エネルギー特化のノウハウ", alert: "green", erosion: 22, news: "Shell社との契約延長。エネルギー分野での堀は維持。" },
-  { ticker: "SOUN", name: "SoundHound AI", moat: "音声特許・自動車メーカー契約", alert: "red", erosion: 71, news: "Appleが車載音声AIの内製化を加速。撤退トリガーに近い。" },
-];
+// 定性的な堀の説明 (人間判断) — 新規銘柄はAPIの業種がフォールバック
+const MOAT_DESCRIPTIONS = {
+  BBAI: "政府・国防のセキュリティ認定",
+  PATH: "レガシーシステムへの深い統合",
+  AI:   "重工業・エネルギー特化のノウハウ",
+  SOUN: "音声特許・自動車メーカー契約",
+};
 
 const MOCK_ETF_LIST = [
   { ticker: "SPY",  name: "S&P500 ETF", category: "米国全体", signal: "yellow", expense: 0.09, aum: "5200億ドル", ret1y: 18.2, risk: "中", desc: "米国大型株500社" },
@@ -297,6 +298,9 @@ function WatchDetail({ item, onBack, onRemove }) {
 }
 
 function MoatCard({ item }) {
+  const loading = item.erosion == null;
+  const erosion = item.erosion ?? 0;
+  const m = item.metrics || {};
   return (
     <div style={{
       background: "#fff", borderRadius: 14, padding: "14px 16px",
@@ -308,24 +312,43 @@ function MoatCard({ item }) {
           <span style={{ fontWeight: 800, fontSize: 15 }}>{item.ticker}</span>
           <span style={{ fontSize: 12, color: "#888", marginLeft: 6 }}>{item.name}</span>
         </div>
-        <span style={{ fontSize: 18 }}>{item.alert === "green" ? "🟢" : item.alert === "yellow" ? "🟡" : "🔴"}</span>
+        {loading
+          ? <span style={{ fontSize: 13, color: "#94a3b8" }}>⏳</span>
+          : <span style={{ fontSize: 18 }}>{item.alert === "green" ? "🟢" : item.alert === "yellow" ? "🟡" : "🔴"}</span>
+        }
       </div>
       <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>堀: {item.moat}</div>
+
+      {/* ファンダメンタルズ指標 */}
+      {!loading && (
+        <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+          {m.grossMargin != null && (
+            <span style={{ fontSize: 11, color: "#64748b" }}>粗利率 <strong style={{ color: m.grossMargin > 40 ? "#22c55e" : "#ef4444" }}>{m.grossMargin}%</strong></span>
+          )}
+          {m.revenueGrowth != null && (
+            <span style={{ fontSize: 11, color: "#64748b" }}>売上成長 <strong style={{ color: m.revenueGrowth > 0 ? "#22c55e" : "#ef4444" }}>{m.revenueGrowth > 0 ? "+" : ""}{m.revenueGrowth}%</strong></span>
+          )}
+          {m.operatingMargin != null && (
+            <span style={{ fontSize: 11, color: "#64748b" }}>営業利益率 <strong style={{ color: m.operatingMargin > 0 ? "#22c55e" : "#ef4444" }}>{m.operatingMargin}%</strong></span>
+          )}
+          {m.recommendation != null && (
+            <span style={{ fontSize: 11, color: "#64748b" }}>アナリスト <strong style={{ color: m.recommendation <= 2 ? "#22c55e" : m.recommendation >= 3.5 ? "#ef4444" : "#f59e0b" }}>{m.recommendation}</strong></span>
+          )}
+        </div>
+      )}
+
       <div style={{ marginTop: 8 }}>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginBottom: 3 }}>
           <span>堀の侵食度</span>
-          <span style={{ fontWeight: 700, color: item.erosion > 60 ? "#ef4444" : item.erosion > 30 ? "#f59e0b" : "#22c55e" }}>
-            {item.erosion}点
-          </span>
+          {!loading && <span style={{ fontWeight: 700, color: erosion > 60 ? "#ef4444" : erosion > 30 ? "#f59e0b" : "#22c55e" }}>{erosion}点</span>}
         </div>
         <div style={{ background: "#f0f0f0", borderRadius: 4, height: 6, overflow: "hidden" }}>
-          <div style={{
-            height: "100%", borderRadius: 4, width: `${item.erosion}%`,
-            background: item.erosion > 60 ? "#ef4444" : item.erosion > 30 ? "#f59e0b" : "#22c55e",
-          }} />
+          {!loading && <div style={{ height: "100%", borderRadius: 4, width: `${erosion}%`, background: erosion > 60 ? "#ef4444" : erosion > 30 ? "#f59e0b" : "#22c55e" }} />}
         </div>
       </div>
-      <div style={{ fontSize: 12, color: "#555", marginTop: 8, lineHeight: 1.5 }}>📰 {item.news}</div>
+      {item.news ? <div style={{ fontSize: 11, color: "#555", marginTop: 8, lineHeight: 1.5 }}>📰 {item.news}</div>
+                 : loading ? <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8 }}>ニュース取得中...</div>
+                 : null}
     </div>
   );
 }
@@ -382,6 +405,8 @@ export default function App() {
     INITIAL_TICKERS.map(({ ticker, position }) => createMockEntry(ticker, position))
   );
 
+  const [moatData, setMoatData] = useState({});
+
   const loadTicker = async (ticker) => {
     try {
       const data = await fetch(`/api/quote/${ticker}`).then(r => r.json());
@@ -401,8 +426,23 @@ export default function App() {
     }
   };
 
+  const loadMoat = async (ticker) => {
+    try {
+      const data = await fetch(`/api/moat/${ticker}`).then(r => r.json());
+      setMoatData(prev => ({ ...prev, [ticker]: data }));
+    } catch {
+      setMoatData(prev => ({
+        ...prev,
+        [ticker]: { ticker, alert: "yellow", erosion: null, news: "取得失敗", metrics: {} },
+      }));
+    }
+  };
+
   useEffect(() => {
-    INITIAL_TICKERS.forEach(({ ticker }) => loadTicker(ticker));
+    INITIAL_TICKERS.forEach(({ ticker }) => {
+      loadTicker(ticker);
+      loadMoat(ticker);
+    });
   }, []);
   const [category, setCategory]   = useState("すべて");
   const [scenario, setScenario]   = useState(null);
@@ -439,6 +479,7 @@ export default function App() {
         } else {
           setWatchlist(prev => [...prev, createMockEntry(ticker)]);
           loadTicker(ticker);
+          loadMoat(ticker);
           reply = `「${ticker}」を監視リストに追加しました。`;
         }
       } else if (isRemove && ticker) {
@@ -546,7 +587,19 @@ export default function App() {
             }}>
               💡 侵食度が60点を超えたら撤退を検討してください
             </div>
-            {MOCK_MOAT.map((item, i) => <MoatCard key={i} item={item} />)}
+            {watchlist.map(({ ticker }) => {
+              const d = moatData[ticker];
+              const item = {
+                ticker,
+                name:    d?.name    ?? ticker,
+                moat:    MOAT_DESCRIPTIONS[ticker] ?? d?.moat ?? ticker,
+                alert:   d?.alert   ?? "yellow",
+                erosion: d?.erosion ?? null,
+                news:    d?.news    ?? null,
+                metrics: d?.metrics ?? {},
+              };
+              return <MoatCard key={ticker} item={item} />;
+            })}
           </>
         )}
 
