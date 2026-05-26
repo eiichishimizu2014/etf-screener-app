@@ -1,43 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
-// ── 初期監視リスト（堀タブ銘柄） ─────────────────────────
-const INITIAL_WATCHLIST = [
-  {
-    ticker: "BBAI", name: "BigBear.ai", type: "stock", currency: "USD",
-    price: 2.85, change: 1.4, ma25: 2.71,
-    rsi: 58, atrRatio: 1.1, volRatio: 1.3,
-    signal: "entry",
-    filters: { rsi: true, atr: true, vol: true },
-    position: null,
-    updated: "今朝 6:30",
-  },
-  {
-    ticker: "PATH", name: "UiPath", type: "stock", currency: "USD",
-    price: 13.42, change: -0.6, ma25: 13.58,
-    rsi: 44, atrRatio: 0.9, volRatio: 0.8,
-    signal: "ma_exit",
-    filters: { rsi: true, atr: true, vol: false },
-    position: { entryPrice: 14.20, shares: 100, entryDate: "2026-04-28", holdDays: 21 },
-    updated: "今朝 6:30",
-  },
-  {
-    ticker: "AI", name: "C3.ai", type: "stock", currency: "USD",
-    price: 22.10, change: 0.8, ma25: 21.45,
-    rsi: 62, atrRatio: 1.2, volRatio: 1.5,
-    signal: "hold",
-    filters: { rsi: true, atr: true, vol: true },
-    position: { entryPrice: 20.50, shares: 50, entryDate: "2026-05-02", holdDays: 17 },
-    updated: "今朝 6:30",
-  },
-  {
-    ticker: "SOUN", name: "SoundHound AI", type: "stock", currency: "USD",
-    price: 9.40, change: -5.1, ma25: 10.80,
-    rsi: 28, atrRatio: 2.1, volRatio: 2.3,
-    signal: "stop_loss",
-    filters: { rsi: false, atr: false, vol: true },
-    position: { entryPrice: 10.50, shares: 200, entryDate: "2026-05-05", holdDays: 14 },
-    updated: "今朝 6:30",
-  },
+// ── 初期監視リスト（ポジション情報のみ保持） ─────────────────────────
+const INITIAL_TICKERS = [
+  { ticker: "BBAI", position: null },
+  { ticker: "PATH", position: { entryPrice: 14.20, shares: 100, entryDate: "2026-04-28", holdDays: 21 } },
+  { ticker: "AI",   position: { entryPrice: 20.50, shares: 50,  entryDate: "2026-05-02", holdDays: 17 } },
+  { ticker: "SOUN", position: { entryPrice: 10.50, shares: 200, entryDate: "2026-05-05", holdDays: 14 } },
 ];
 
 const MOCK_MOAT = [
@@ -75,7 +43,7 @@ const SIGNAL_CFG = {
 const alertColor = { green: "#22c55e", yellow: "#f59e0b", red: "#ef4444" };
 const signalColor = { green: "#22c55e", yellow: "#f59e0b", red: "#ef4444" };
 
-function createMockEntry(ticker) {
+function createMockEntry(ticker, position = null) {
   return {
     ticker: ticker.toUpperCase(),
     name: ticker.toUpperCase(),
@@ -85,7 +53,7 @@ function createMockEntry(ticker) {
     rsi: null, atrRatio: null, volRatio: null,
     signal: "loading",
     filters: { rsi: null, atr: null, vol: null },
-    position: null,
+    position,
     updated: "取得中...",
   };
 }
@@ -410,7 +378,32 @@ function ETFCard({ etf, showScenario }) {
 // ── メインアプリ ─────────────────────────────────────────
 export default function App() {
   const [tab, setTab]             = useState("watch");
-  const [watchlist, setWatchlist] = useState(INITIAL_WATCHLIST);
+  const [watchlist, setWatchlist] = useState(() =>
+    INITIAL_TICKERS.map(({ ticker, position }) => createMockEntry(ticker, position))
+  );
+
+  const loadTicker = async (ticker) => {
+    try {
+      const data = await fetch(`/api/quote/${ticker}`).then(r => r.json());
+      setWatchlist(prev =>
+        prev.map(w => w.ticker === ticker
+          ? { ...w, ...data, position: w.position, type: "stock" }
+          : w
+        )
+      );
+    } catch {
+      setWatchlist(prev =>
+        prev.map(w => w.ticker === ticker
+          ? { ...w, updated: "エラー" }
+          : w
+        )
+      );
+    }
+  };
+
+  useEffect(() => {
+    INITIAL_TICKERS.forEach(({ ticker }) => loadTicker(ticker));
+  }, []);
   const [category, setCategory]   = useState("すべて");
   const [scenario, setScenario]   = useState(null);
   const [chatInput, setChatInput] = useState("");
@@ -445,6 +438,7 @@ export default function App() {
           reply = `「${ticker}」はすでに監視リストに登録されています。`;
         } else {
           setWatchlist(prev => [...prev, createMockEntry(ticker)]);
+          loadTicker(ticker);
           reply = `「${ticker}」を監視リストに追加しました。`;
         }
       } else if (isRemove && ticker) {
@@ -491,7 +485,7 @@ export default function App() {
         <div style={{ fontSize: 11, color: "#94a3b8", letterSpacing: 2, textTransform: "uppercase" }}>ETF & 銘柄スクリーナー</div>
         <div style={{ fontSize: 20, fontWeight: 800, marginTop: 2 }}>投資監視ダッシュボード</div>
         <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
-          最終更新: 今朝 6:30　　<span style={{ color: "#22c55e" }}>● ライブ</span>
+          <span style={{ color: "#22c55e" }}>● リアルタイム取得（Yahoo Finance）</span>
         </div>
       </div>
 
