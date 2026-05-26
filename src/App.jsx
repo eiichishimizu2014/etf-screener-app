@@ -353,6 +353,129 @@ function MoatCard({ item }) {
   );
 }
 
+function MoatDetail({ item, onBack }) {
+  const loading = item.erosion == null;
+  const erosion = item.erosion ?? 0;
+  const m = item.metrics || {};
+  const breakdown = item.breakdown || [];
+  const newsItems = item.newsItems || [];
+
+  const verdict = erosion >= 60
+    ? { label: "🔴 撤退を検討", color: "#b91c1c", bg: "#fee2e2", sub: "堀が大きく侵食されています。中期保有は高リスクです。" }
+    : erosion >= 30
+    ? { label: "🟡 継続監視", color: "#92400e", bg: "#fef9c3", sub: "一部の優位性が揺らいでいます。四半期ごとに再評価してください。" }
+    : { label: "🟢 保有継続", color: "#15803d", bg: "#dcfce7", sub: "競争優位性は健在です。中期保有に問題ありません。" };
+
+  const statusIcon = { green: "✅", yellow: "⚠️", red: "❌" };
+
+  return (
+    <div>
+      <button onClick={onBack} style={{
+        background: "none", border: "none", color: "#3b82f6",
+        fontSize: 13, cursor: "pointer", padding: "0 0 10px",
+      }}>← 堀一覧へ戻る</button>
+
+      {/* ヘッダー */}
+      <div style={{ background: "#fff", borderRadius: 14, padding: "14px 16px", marginBottom: 10, boxShadow: "0 1px 8px #0001" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 20 }}>{item.ticker}</div>
+            <div style={{ fontSize: 13, color: "#666", marginTop: 2 }}>{item.name}</div>
+          </div>
+          {loading
+            ? <span style={{ fontSize: 14, color: "#94a3b8" }}>⏳ 取得中</span>
+            : <span style={{ fontSize: 22 }}>{item.alert === "green" ? "🟢" : item.alert === "yellow" ? "🟡" : "🔴"}</span>
+          }
+        </div>
+        <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
+          🏰 <strong>堀の源泉：</strong>{item.moat}
+        </div>
+      </div>
+
+      {/* 中期判断バナー */}
+      {!loading && (
+        <div style={{ background: verdict.bg, borderRadius: 12, padding: "12px 16px", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 }}>中期保有判断</div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: verdict.color, marginTop: 4 }}>{verdict.label}</div>
+          <div style={{ fontSize: 12, color: verdict.color, marginTop: 3, opacity: 0.85 }}>{verdict.sub}</div>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginBottom: 4 }}>
+              <span>侵食度スコア</span>
+              <span style={{ fontWeight: 700, color: verdict.color }}>{erosion} / 100点</span>
+            </div>
+            <div style={{ background: "#fff8", borderRadius: 4, height: 7, overflow: "hidden" }}>
+              <div style={{ height: "100%", borderRadius: 4, width: `${erosion}%`, background: verdict.color }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 侵食度 内訳 */}
+      {breakdown.length > 0 && (
+        <div style={{ background: "#fff", borderRadius: 14, padding: "14px 16px", marginBottom: 10, boxShadow: "0 1px 8px #0001" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 10 }}>📊 侵食度の内訳</div>
+          {breakdown.map((b, i) => (
+            <div key={i} style={{ borderBottom: i < breakdown.length - 1 ? "1px solid #f1f5f9" : "none", paddingBottom: 10, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 13 }}>{statusIcon[b.status]}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>{b.factor}</span>
+                </div>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10,
+                  background: b.points === 0 ? "#dcfce7" : b.status === "red" ? "#fee2e2" : "#fef9c3",
+                  color: b.points === 0 ? "#15803d" : b.status === "red" ? "#b91c1c" : "#92400e",
+                }}>{b.points === 0 ? "問題なし" : `+${b.points}点`}</span>
+              </div>
+              <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.5, paddingLeft: 20 }}>{b.detail}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ファンダメンタルズ指標 */}
+      {!loading && (
+        <div style={{ background: "#fff", borderRadius: 14, padding: "14px 16px", marginBottom: 10, boxShadow: "0 1px 8px #0001" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 10 }}>📈 主要指標</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {[
+              { label: "粗利率",      value: m.grossMargin     != null ? `${m.grossMargin}%`     : "–", color: m.grossMargin > 40 ? "#22c55e" : m.grossMargin > 20 ? "#f59e0b" : "#ef4444" },
+              { label: "売上成長率",   value: m.revenueGrowth   != null ? `${m.revenueGrowth > 0 ? "+" : ""}${m.revenueGrowth}%` : "–", color: m.revenueGrowth > 5 ? "#22c55e" : m.revenueGrowth > -5 ? "#f59e0b" : "#ef4444" },
+              { label: "営業利益率",   value: m.operatingMargin != null ? `${m.operatingMargin}%` : "–", color: m.operatingMargin > 0 ? "#22c55e" : "#ef4444" },
+              { label: "ROE",         value: m.roe             != null ? `${m.roe}%`             : "–", color: m.roe > 10 ? "#22c55e" : m.roe > 0 ? "#f59e0b" : "#ef4444" },
+              { label: "アナリスト評価", value: m.recommendation  != null ? `${m.recommendation} / 5` : "–", color: m.recommendation <= 2 ? "#22c55e" : m.recommendation >= 3.5 ? "#ef4444" : "#f59e0b" },
+              { label: "空売り比率",   value: m.shortPct        != null ? `${m.shortPct}%`       : "–", color: m.shortPct < 10 ? "#22c55e" : m.shortPct < 20 ? "#f59e0b" : "#ef4444" },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ background: "#f8fafc", borderRadius: 10, padding: "9px 11px" }}>
+                <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>{label}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 最新ニュース */}
+      <div style={{ background: "#fff", borderRadius: 14, padding: "14px 16px", marginBottom: 10, boxShadow: "0 1px 8px #0001" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 10 }}>📰 最新ニュース</div>
+        {newsItems.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#94a3b8" }}>{loading ? "ニュース取得中..." : "ニュースが見つかりませんでした"}</div>
+        ) : (
+          newsItems.map((n, i) => (
+            <div key={i} style={{ borderBottom: i < newsItems.length - 1 ? "1px solid #f1f5f9" : "none", paddingBottom: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 13, color: "#1e293b", lineHeight: 1.5, fontWeight: 500 }}>{n.title}</div>
+              <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4, display: "flex", gap: 8 }}>
+                {n.publisher && <span>{n.publisher}</span>}
+                {n.pubDate && <span>{n.pubDate.slice(0, 10)}</span>}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ETFCard({ etf, showScenario }) {
   return (
     <div style={{
@@ -451,6 +574,7 @@ export default function App() {
     { role: "ai", text: "こんにちは！「AAPLを追加して」「SOUNを削除して」など、監視銘柄の追加・削除ができます。" }
   ]);
   const [selectedWatch, setSelectedWatch] = useState(null);
+  const [selectedMoat, setSelectedMoat]   = useState(null);
 
   const removeFromWatchlist = (ticker) => {
     setWatchlist(prev => prev.filter(w => w.ticker !== ticker));
@@ -580,26 +704,41 @@ export default function App() {
         {/* === 堀タブ === */}
         {tab === "moat" && (
           <>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginBottom: 6 }}>🏰 堀（競争優位性）監視</div>
-            <div style={{
-              background: "#fefce8", border: "1px solid #fde047", borderRadius: 10,
-              padding: "8px 12px", marginBottom: 12, fontSize: 12, color: "#854d0e"
-            }}>
-              💡 侵食度が60点を超えたら撤退を検討してください
-            </div>
-            {watchlist.map(({ ticker }) => {
-              const d = moatData[ticker];
-              const item = {
-                ticker,
-                name:    d?.name    ?? ticker,
-                moat:    MOAT_DESCRIPTIONS[ticker] ?? d?.moat ?? ticker,
-                alert:   d?.alert   ?? "yellow",
-                erosion: d?.erosion ?? null,
-                news:    d?.news    ?? null,
-                metrics: d?.metrics ?? {},
-              };
-              return <MoatCard key={ticker} item={item} />;
-            })}
+            {selectedMoat ? (
+              <MoatDetail
+                item={selectedMoat}
+                onBack={() => setSelectedMoat(null)}
+              />
+            ) : (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginBottom: 6 }}>🏰 堀（競争優位性）監視</div>
+                <div style={{
+                  background: "#fefce8", border: "1px solid #fde047", borderRadius: 10,
+                  padding: "8px 12px", marginBottom: 12, fontSize: 12, color: "#854d0e"
+                }}>
+                  💡 銘柄をタップすると侵食度の内訳・最新ニュースを確認できます
+                </div>
+                {watchlist.map(({ ticker }) => {
+                  const d = moatData[ticker];
+                  const item = {
+                    ticker,
+                    name:      d?.name      ?? ticker,
+                    moat:      MOAT_DESCRIPTIONS[ticker] ?? d?.moat ?? ticker,
+                    alert:     d?.alert     ?? "yellow",
+                    erosion:   d?.erosion   ?? null,
+                    news:      d?.news      ?? null,
+                    newsItems: d?.newsItems ?? [],
+                    breakdown: d?.breakdown ?? [],
+                    metrics:   d?.metrics   ?? {},
+                  };
+                  return (
+                    <div key={ticker} onClick={() => setSelectedMoat(item)} style={{ cursor: "pointer" }}>
+                      <MoatCard item={item} />
+                    </div>
+                  );
+                })}
+              </>
+            )}
           </>
         )}
 
@@ -688,7 +827,7 @@ export default function App() {
         display: "flex", zIndex: 100
       }}>
         {TAB_ITEMS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
+          <button key={t.id} onClick={() => { setTab(t.id); setSelectedMoat(null); }} style={{
             flex: 1, padding: "10px 0 12px", border: "none", cursor: "pointer",
             background: "none",
             color: tab === t.id ? "#0f172a" : "#94a3b8",

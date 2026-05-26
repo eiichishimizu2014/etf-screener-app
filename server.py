@@ -166,28 +166,85 @@ async def get_moat(ticker: str):
         short_pct      = info.get("shortPercentOfFloat") or 0.0
         roe            = info.get("returnOnEquity")  or 0.0
 
-        # 侵食度スコア (0–100)
+        # 侵食度スコア (0–100) + 内訳
         erosion = 0
-        if gross_margin < 0.2:   erosion += 20
-        elif gross_margin < 0.4: erosion += 10
-        if rev_growth < -0.05:   erosion += 25
-        elif rev_growth < 0.05:  erosion += 10
-        if op_margin < -0.2:     erosion += 20
-        elif op_margin < 0:      erosion += 10
-        if rec >= 3.5:           erosion += 20
-        elif rec >= 2.5:         erosion += 5
-        if short_pct > 0.2:      erosion += 15
-        elif short_pct > 0.1:    erosion += 5
-        erosion = min(100, erosion)
+        breakdown = []
 
+        if gross_margin < 0.2:
+            erosion += 20
+            breakdown.append({"factor": "粗利率", "points": 20, "status": "red",
+                               "detail": f"{round(gross_margin*100,1)}% — 参入障壁が低い可能性。競合に価格競争で負けるリスク。"})
+        elif gross_margin < 0.4:
+            erosion += 10
+            breakdown.append({"factor": "粗利率", "points": 10, "status": "yellow",
+                               "detail": f"{round(gross_margin*100,1)}% — やや低水準。競合圧力が徐々に拡大している可能性。"})
+        else:
+            breakdown.append({"factor": "粗利率", "points": 0, "status": "green",
+                               "detail": f"{round(gross_margin*100,1)}% — 高い参入障壁を維持。価格支配力あり。"})
+
+        if rev_growth < -0.05:
+            erosion += 25
+            breakdown.append({"factor": "売上成長", "points": 25, "status": "red",
+                               "detail": f"{round(rev_growth*100,1)}% — 市場シェア喪失か需要縮小。堀が崩れている可能性が高い。"})
+        elif rev_growth < 0.05:
+            erosion += 10
+            breakdown.append({"factor": "売上成長", "points": 10, "status": "yellow",
+                               "detail": f"{round(rev_growth*100,1)}% — 成長鈍化。競合の追い上げに注意。"})
+        else:
+            breakdown.append({"factor": "売上成長", "points": 0, "status": "green",
+                               "detail": f"+{round(rev_growth*100,1)}% — 成長継続。堀が拡大中。"})
+
+        if op_margin < -0.2:
+            erosion += 20
+            breakdown.append({"factor": "営業利益率", "points": 20, "status": "red",
+                               "detail": f"{round(op_margin*100,1)}% — 収益性に深刻な問題。資金調達リスクあり。"})
+        elif op_margin < 0:
+            erosion += 10
+            breakdown.append({"factor": "営業利益率", "points": 10, "status": "yellow",
+                               "detail": f"{round(op_margin*100,1)}% — 赤字体質。収益化の目処を確認すべき。"})
+        else:
+            breakdown.append({"factor": "営業利益率", "points": 0, "status": "green",
+                               "detail": f"{round(op_margin*100,1)}% — 収益性良好。自己資金でシェア拡大が可能。"})
+
+        if rec >= 3.5:
+            erosion += 20
+            breakdown.append({"factor": "アナリスト評価", "points": 20, "status": "red",
+                               "detail": f"{round(rec,1)} / 5.0 — 売り推奨寄り。機関投資家がネガティブに転じている可能性。"})
+        elif rec >= 2.5:
+            erosion += 5
+            breakdown.append({"factor": "アナリスト評価", "points": 5, "status": "yellow",
+                               "detail": f"{round(rec,1)} / 5.0 — 中立。見通しが割れている状態。"})
+        else:
+            breakdown.append({"factor": "アナリスト評価", "points": 0, "status": "green",
+                               "detail": f"{round(rec,1)} / 5.0 — 買い推奨多数。プロが堀の持続性を評価。"})
+
+        if short_pct > 0.2:
+            erosion += 15
+            breakdown.append({"factor": "空売り比率", "points": 15, "status": "red",
+                               "detail": f"{round(short_pct*100,1)}% — 機関の売り圧力が強い。悪材料が先に織り込まれるリスク。"})
+        elif short_pct > 0.1:
+            erosion += 5
+            breakdown.append({"factor": "空売り比率", "points": 5, "status": "yellow",
+                               "detail": f"{round(short_pct*100,1)}% — やや注意。ネガティブな見方が増えつつある。"})
+        else:
+            breakdown.append({"factor": "空売り比率", "points": 0, "status": "green",
+                               "detail": f"{round(short_pct*100,1)}% — 正常範囲。弱気筋の圧力は限定的。"})
+
+        erosion = min(100, erosion)
         alert = "red" if erosion >= 60 else "yellow" if erosion >= 30 else "green"
 
-        # 最新ニュースタイトル
-        news_title = ""
+        # ニュース複数件取得
+        news_items = []
         try:
             articles = t.news or []
-            if articles:
-                news_title = articles[0].get("title", "")
+            for article in articles[:5]:
+                content = article.get("content") or {}
+                title = content.get("title") or article.get("title", "")
+                link  = content.get("canonicalUrl", {}).get("url", "") or article.get("link", "")
+                pub   = content.get("provider", {}).get("displayName", "") or article.get("publisher", "")
+                ts    = content.get("pubDate", "") or ""
+                if title:
+                    news_items.append({"title": title, "publisher": pub, "link": link, "pubDate": ts})
         except Exception:
             pass
 
@@ -195,19 +252,21 @@ async def get_moat(ticker: str):
         moat_fallback = info.get("industry") or info.get("sector") or ticker
 
         data = {
-            "ticker":  ticker,
-            "name":    info.get("longName") or info.get("shortName") or ticker,
-            "moat":    moat_fallback,
-            "alert":   alert,
-            "erosion": erosion,
-            "news":    news_title,
+            "ticker":    ticker,
+            "name":      info.get("longName") or info.get("shortName") or ticker,
+            "moat":      moat_fallback,
+            "alert":     alert,
+            "erosion":   erosion,
+            "news":      news_items[0]["title"] if news_items else "",
+            "newsItems": news_items,
+            "breakdown": breakdown,
             "metrics": {
-                "grossMargin":      round(gross_margin * 100, 1) if gross_margin else None,
-                "revenueGrowth":    round(rev_growth   * 100, 1) if rev_growth   else None,
-                "operatingMargin":  round(op_margin    * 100, 1) if op_margin    else None,
-                "recommendation":   round(rec, 1),
-                "shortPct":         round(short_pct    * 100, 1) if short_pct    else None,
-                "roe":              round(roe           * 100, 1) if roe          else None,
+                "grossMargin":     round(gross_margin * 100, 1) if gross_margin else None,
+                "revenueGrowth":   round(rev_growth   * 100, 1) if rev_growth   else None,
+                "operatingMargin": round(op_margin    * 100, 1) if op_margin    else None,
+                "recommendation":  round(rec, 1),
+                "shortPct":        round(short_pct    * 100, 1) if short_pct    else None,
+                "roe":             round(roe           * 100, 1) if roe          else None,
             },
         }
         _MOAT_CACHE[ticker] = (data, time.monotonic())
