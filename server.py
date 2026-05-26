@@ -9,6 +9,7 @@ from pathlib import Path
 
 import uvicorn
 import yfinance as yf
+from deep_translator import GoogleTranslator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +32,16 @@ _CACHE_TTL = 300
 
 _MOAT_CACHE: dict[str, tuple[dict, float]] = {}
 _MOAT_TTL = 3600
+
+
+def _translate_ja(text: str) -> str:
+    """英語テキストを日本語に翻訳する。失敗時は原文を返す。"""
+    if not text:
+        return text
+    try:
+        return GoogleTranslator(source="auto", target="ja").translate(text) or text
+    except Exception:
+        return text
 
 
 def _cached(ticker: str) -> dict | None:
@@ -233,18 +244,25 @@ async def get_moat(ticker: str):
         erosion = min(100, erosion)
         alert = "red" if erosion >= 60 else "yellow" if erosion >= 30 else "green"
 
-        # ニュース複数件取得
+        # ニュース複数件取得 + 日本語翻訳
         news_items = []
         try:
             articles = t.news or []
             for article in articles[:5]:
                 content = article.get("content") or {}
-                title = content.get("title") or article.get("title", "")
-                link  = content.get("canonicalUrl", {}).get("url", "") or article.get("link", "")
-                pub   = content.get("provider", {}).get("displayName", "") or article.get("publisher", "")
-                ts    = content.get("pubDate", "") or ""
-                if title:
-                    news_items.append({"title": title, "publisher": pub, "link": link, "pubDate": ts})
+                title_en = content.get("title") or article.get("title", "")
+                link     = content.get("canonicalUrl", {}).get("url", "") or article.get("link", "")
+                pub      = content.get("provider", {}).get("displayName", "") or article.get("publisher", "")
+                ts       = content.get("pubDate", "") or ""
+                if title_en:
+                    title_ja = _translate_ja(title_en)
+                    news_items.append({
+                        "title":    title_ja,
+                        "titleEn":  title_en,
+                        "publisher": pub,
+                        "link":     link,
+                        "pubDate":  ts,
+                    })
         except Exception:
             pass
 
