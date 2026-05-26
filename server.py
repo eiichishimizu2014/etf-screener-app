@@ -12,6 +12,7 @@ import yfinance as yf
 from deep_translator import GoogleTranslator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 logging.basicConfig(level=logging.INFO)
@@ -299,6 +300,14 @@ async def get_moat(ticker: str):
 # React の dist を配信 (本番のみ)
 _dist = Path(__file__).parent / "dist"
 if _dist.exists():
+    _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/index.html", include_in_schema=False)
+    async def serve_index():
+        """index.html は常に最新を返す（モバイルキャッシュ対策）。"""
+        return FileResponse(str(_dist / "index.html"), headers=_NO_CACHE)
+
     app.mount("/", StaticFiles(directory=str(_dist), html=True), name="static")
 
 if __name__ == "__main__":
