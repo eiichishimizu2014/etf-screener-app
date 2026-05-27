@@ -245,12 +245,28 @@ async def get_moat(ticker: str):
         erosion = min(100, erosion)
         alert = "red" if erosion >= 60 else "yellow" if erosion >= 30 else "green"
 
-        # ニュース複数件取得 + 日本語翻訳
+        # ニュース複数件取得 + 会社名フィルタ + 日本語翻訳
         news_items = []
         try:
             articles = t.news or []
-            for article in articles[:5]:
+            company_name = info.get("longName") or info.get("shortName") or ticker
+            # 関連度スコア: 会社名 or ティッカーを含む記事を優先
+            keywords = [ticker.lower()]
+            # 会社名の先頭2単語をキーワードとして追加 (例: "BigBear.ai" → ["bigbear.ai"])
+            for word in company_name.lower().split()[:2]:
+                clean = word.strip(".,")
+                if len(clean) >= 4:
+                    keywords.append(clean)
+
+            def _relevance(article: dict) -> int:
                 content = article.get("content") or {}
+                title = (content.get("title") or article.get("title", "")).lower()
+                return 0 if any(k in title for k in keywords) else 1
+
+            # 関連度順に並べ替えて最大10件から5件取得
+            sorted_articles = sorted(articles[:10], key=_relevance)
+            for article in sorted_articles[:5]:
+                content  = article.get("content") or {}
                 title_en = content.get("title") or article.get("title", "")
                 link     = content.get("canonicalUrl", {}).get("url", "") or article.get("link", "")
                 pub      = content.get("provider", {}).get("displayName", "") or article.get("publisher", "")
@@ -258,11 +274,11 @@ async def get_moat(ticker: str):
                 if title_en:
                     title_ja = _translate_ja(title_en)
                     news_items.append({
-                        "title":    title_ja,
-                        "titleEn":  title_en,
+                        "title":     title_ja,
+                        "titleEn":   title_en,
                         "publisher": pub,
-                        "link":     link,
-                        "pubDate":  ts,
+                        "link":      link,
+                        "pubDate":   ts,
                     })
         except Exception:
             pass

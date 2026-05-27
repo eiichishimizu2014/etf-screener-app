@@ -463,7 +463,17 @@ function MoatDetail({ item, onBack }) {
         ) : (
           newsItems.map((n, i) => (
             <div key={i} style={{ borderBottom: i < newsItems.length - 1 ? "1px solid #f1f5f9" : "none", paddingBottom: 10, marginBottom: 10 }}>
-              <div style={{ fontSize: 13, color: "#1e293b", lineHeight: 1.5, fontWeight: 500 }}>{n.title}</div>
+              {n.link ? (
+                <a href={n.link} target="_blank" rel="noopener noreferrer" style={{
+                  fontSize: 13, color: "#1e293b", lineHeight: 1.5, fontWeight: 500,
+                  textDecoration: "none", display: "block",
+                }}>
+                  {n.title}
+                  <span style={{ fontSize: 11, color: "#3b82f6", marginLeft: 5 }}>↗</span>
+                </a>
+              ) : (
+                <div style={{ fontSize: 13, color: "#1e293b", lineHeight: 1.5, fontWeight: 500 }}>{n.title}</div>
+              )}
               <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4, display: "flex", gap: 8 }}>
                 {n.publisher && <span>{n.publisher}</span>}
                 {n.pubDate && <span>{n.pubDate.slice(0, 10)}</span>}
