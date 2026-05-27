@@ -169,7 +169,15 @@ async def get_moat(ticker: str):
 
     try:
         t = yf.Ticker(ticker)
-        info = t.get_info() if hasattr(t, "get_info") else t.info
+
+        # .info は Yahoo Finance の別エンドポイントを叩くため独立して保護する
+        info: dict = {}
+        try:
+            info = t.get_info() if hasattr(t, "get_info") else t.info
+            if not isinstance(info, dict):
+                info = {}
+        except Exception as info_err:
+            logger.warning("%s: info 取得失敗 (%s) — ニュースのみ返す", ticker, info_err)
 
         gross_margin   = info.get("grossMargins")    or 0.0
         rev_growth     = info.get("revenueGrowth")   or 0.0
@@ -307,10 +315,10 @@ async def get_moat(ticker: str):
         _MOAT_CACHE[ticker] = (data, time.monotonic())
         return data
 
-    except Exception:
-        logger.exception("%s: moat 取得エラー", ticker)
+    except Exception as e:
+        logger.exception("%s: moat 取得エラー: %s", ticker, e)
         return {"ticker": ticker, "alert": "yellow", "erosion": None,
-                "news": "取得失敗", "metrics": {}}
+                "news": "取得失敗", "newsItems": [], "breakdown": [], "metrics": {}}
 
 
 # React の dist を配信 (本番のみ)
