@@ -170,21 +170,47 @@ async def get_moat(ticker: str):
     try:
         t = yf.Ticker(ticker)
 
-        # .info は Yahoo Finance の別エンドポイントを叩くため独立して保護する
+        # ── Step1: t.info（基本情報 + 財務指標）────────────────────────
         info: dict = {}
         try:
-            info = t.get_info() if hasattr(t, "get_info") else t.info
-            if not isinstance(info, dict):
-                info = {}
-        except Exception as info_err:
-            logger.warning("%s: info 取得失敗 (%s) — ニュースのみ返す", ticker, info_err)
+            raw = t.get_info() if hasattr(t, "get_info") else t.info
+            if isinstance(raw, dict):
+                info = raw
+        except Exception as e:
+            logger.warning("%s: info 取得失敗 (%s)", ticker, e)
 
-        gross_margin   = info.get("grossMargins")    or 0.0
-        rev_growth     = info.get("revenueGrowth")   or 0.0
-        op_margin      = info.get("operatingMargins") or 0.0
-        rec            = info.get("recommendationMean") or 3.0
-        short_pct      = info.get("shortPercentOfFloat") or 0.0
-        roe            = info.get("returnOnEquity")  or 0.0
+        gross_margin = float(info.get("grossMargins")        or 0)
+        rev_growth   = float(info.get("revenueGrowth")       or 0)
+        op_margin    = float(info.get("operatingMargins")    or 0)
+        rec          = float(info.get("recommendationMean")  or 0) or 3.0
+        short_pct    = float(info.get("shortPercentOfFloat") or 0)
+        roe          = float(info.get("returnOnEquity")      or 0)
+
+        # ── Step2: info に財務指標がなければ income_stmt で補完 ──────────
+        if not gross_margin and not rev_growth and not op_margin:
+            logger.info("%s: info に財務データなし → income_stmt にフォールバック", ticker)
+            try:
+                stmt = (t.get_income_stmt()
+                        if hasattr(t, "get_income_stmt") else t.income_stmt)
+                if stmt is not None and not stmt.empty and len(stmt.columns) >= 1:
+                    c0 = stmt.columns[0]
+                    c1 = stmt.columns[1] if len(stmt.columns) >= 2 else c0
+
+                    def _v(row: str, col=c0):
+                        return float(stmt.loc[row, col]) if row in stmt.index else None
+
+                    rev0 = _v("Total Revenue")
+                    rev1 = _v("Total Revenue", c1)
+                    gp   = _v("Gross Profit")
+                    oi   = _v("Operating Income")
+
+                    if rev0 and rev0 != 0:
+                        if gp  is not None: gross_margin = gp  / rev0
+                        if oi  is not None: op_margin    = oi  / rev0
+                        if rev1 and rev1 != 0:
+                            rev_growth = (rev0 - rev1) / abs(rev1)
+            except Exception as e:
+                logger.warning("%s: income_stmt 取得失敗 (%s)", ticker, e)
 
         # 侵食度スコア (0–100) + 内訳
         erosion = 0
