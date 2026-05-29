@@ -36,6 +36,74 @@ _MOAT_CACHE: dict[str, tuple[dict, float]] = {}
 _MOAT_TTL = 3600
 
 
+# ── Alpha Vantage（財務データのメインソース）─────────────────────────
+_AV_KEY = os.getenv("ALPHAVANTAGE_API_KEY", "")
+
+
+def _fetch_fundamentals_av(ticker: str) -> dict:
+    """Alpha Vantage OVERVIEW エンドポイントで財務指標を取得。"""
+    if not _AV_KEY:
+        return {}
+    try:
+        r = _requests.get(
+            "https://www.alphavantage.co/query",
+            params={"function": "OVERVIEW", "symbol": ticker, "apikey": _AV_KEY},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            logger.warning("%s: AV status=%s", ticker, r.status_code)
+            return {}
+        d = r.json()
+        if not d or "Symbol" not in d:
+            logger.warning("%s: AV レスポンス空 (rate limit?): %r", ticker, str(d)[:80])
+            return {}
+
+        def _f(key):
+            v = d.get(key)
+            return float(v) if v and v not in ("None", "-", "") else None
+
+        # 粗利率 = GrossProfitTTM / RevenueTTM
+        gp  = _f("GrossProfitTTM")
+        rev = _f("RevenueTTM")
+        gross_margin = (gp / rev) if (gp is not None and rev) else None
+
+        op_margin  = _f("OperatingMarginTTM")
+        rev_growth = _f("QuarterlyRevenueGrowthYOY")
+        roe        = _f("ReturnOnEquityTTM")
+
+        # アナリスト評価（1=強い買い … 5=強い売り）
+        rec = None
+        try:
+            sb = int(d.get("AnalystRatingStrongBuy")  or 0)
+            b  = int(d.get("AnalystRatingBuy")        or 0)
+            h  = int(d.get("AnalystRatingHold")       or 0)
+            s  = int(d.get("AnalystRatingSell")       or 0)
+            ss = int(d.get("AnalystRatingStrongSell") or 0)
+            total = sb + b + h + s + ss
+            if total > 0:
+                rec = (sb*1 + b*2 + h*3 + s*4 + ss*5) / total
+        except Exception:
+            pass
+
+        logger.info("%s: AV 成功 gm=%.2f rg=%s om=%s",
+                    ticker, gross_margin or 0, rev_growth, op_margin)
+        return {
+            "grossMargins":        gross_margin,
+            "revenueGrowth":       rev_growth,
+            "operatingMargins":    op_margin,
+            "recommendationMean":  rec,
+            "shortPercentOfFloat": None,
+            "returnOnEquity":      roe,
+            "longName":  d.get("Name"),
+            "shortName": d.get("Name"),
+            "industry":  d.get("Industry"),
+            "sector":    d.get("Sector"),
+        }
+    except Exception as e:
+        logger.warning("%s: AV 取得失敗: %s", ticker, e)
+        return {}
+
+
 # ── Yahoo Finance 直接 HTTP（crumb ベース）────────────────────────────
 _YF_SESSION: _requests.Session | None = None
 _YF_CRUMB: str | None = None
@@ -261,9 +329,17 @@ async def get_moat(ticker: str):
         except Exception as e:
             logger.warning("%s: t.info 失敗 (%s)", ticker, e)
 
-        # ── Step2: info に財務データがなければ直接 HTTP で取得 ───────────
+        # ── Step2: info に財務データがなければ Alpha Vantage で取得 ──────
         if not info.get("grossMargins") and not info.get("revenueGrowth"):
-            logger.info("%s: info 空 → _fetch_fundamentals にフォールバック", ticker)
+            logger.info("%s: info 空 → Alpha Vantage にフォールバック", ticker)
+            av = _fetch_fundamentals_av(ticker)
+            if av.get("grossMargins") is not None or av.get("operatingMargins") is not None:
+                info = av
+                logger.info("%s: Alpha Vantage 成功", ticker)
+
+        # ── Step3: AV も失敗なら Yahoo Finance 直接 HTTP を試みる ────────
+        if not info.get("grossMargins") and not info.get("revenueGrowth"):
+            logger.info("%s: AV 空 → _fetch_fundamentals にフォールバック", ticker)
             direct = _fetch_fundamentals(ticker)
             if direct.get("grossMargins") is not None:
                 info = direct
