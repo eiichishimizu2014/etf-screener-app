@@ -586,15 +586,16 @@ export default function App() {
     } catch {
       setMoatData(prev => ({
         ...prev,
-        [ticker]: { ticker, alert: "yellow", erosion: null, news: "取得失敗", metrics: {} },
+        [ticker]: { ticker, alert: "yellow", erosion: null, hasData: false, news: "取得失敗", metrics: {}, newsItems: [], breakdown: [] },
       }));
     }
   };
 
   useEffect(() => {
-    INITIAL_TICKERS.forEach(({ ticker }) => {
+    INITIAL_TICKERS.forEach(({ ticker }, i) => {
       loadTicker(ticker);
-      loadMoat(ticker);
+      // Alpha Vantage 無料枠は 5件/分 → 1.5秒ずつずらして同時リクエストを回避
+      setTimeout(() => loadMoat(ticker), i * 1500);
     });
   }, []);
   const [category, setCategory]   = useState("すべて");

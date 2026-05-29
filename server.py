@@ -55,7 +55,13 @@ def _fetch_fundamentals_av(ticker: str) -> dict:
             return {}
         d = r.json()
         if not d or "Symbol" not in d:
-            logger.warning("%s: AV レスポンス空 (rate limit?): %r", ticker, str(d)[:80])
+            note = d.get("Note") or d.get("Information") or ""
+            if "rate limit" in note.lower() or "25 requests" in note.lower():
+                logger.warning("%s: AV 日次制限到達 (25件/日): %r", ticker, note[:100])
+            elif "Invalid API" in note:
+                logger.error("%s: AV APIキー無効: %r", ticker, note[:100])
+            else:
+                logger.warning("%s: AV データなし (未対応ティッカー?): %r", ticker, str(d)[:80])
             return {}
 
         def _f(key):
