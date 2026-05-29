@@ -269,79 +269,98 @@ async def get_moat(ticker: str):
                 info = direct
                 logger.info("%s: _fetch_fundamentals 成功", ticker)
 
-        gross_margin = float(info.get("grossMargins")        or 0)
-        rev_growth   = float(info.get("revenueGrowth")       or 0)
-        op_margin    = float(info.get("operatingMargins")    or 0)
-        rec          = float(info.get("recommendationMean")  or 0) or 3.0
-        short_pct    = float(info.get("shortPercentOfFloat") or 0)
-        roe          = float(info.get("returnOnEquity")      or 0)
+        gross_margin = info.get("grossMargins")
+        rev_growth   = info.get("revenueGrowth")
+        op_margin    = info.get("operatingMargins")
+        rec          = info.get("recommendationMean")
+        short_pct    = info.get("shortPercentOfFloat")
+        roe          = info.get("returnOnEquity")
 
-        # 侵食度スコア (0–100) + 内訳
-        erosion = 0
+        # 財務データが取得できているか判定
+        has_data = any(v is not None for v in [gross_margin, rev_growth, op_margin])
+
+        # None → 計算用デフォルト
+        gm  = float(gross_margin or 0)
+        rg  = float(rev_growth   or 0)
+        om  = float(op_margin    or 0)
+        rc  = float(rec          or 3.0)
+        sp  = float(short_pct    or 0)
+
+        # 侵食度スコア (0–100) + 内訳（財務データがない場合は算出しない）
+        erosion: int | None = None
         breakdown = []
 
-        if gross_margin < 0.2:
-            erosion += 20
-            breakdown.append({"factor": "粗利率", "points": 20, "status": "red",
-                               "detail": f"{round(gross_margin*100,1)}% — 参入障壁が低い可能性。競合に価格競争で負けるリスク。"})
-        elif gross_margin < 0.4:
-            erosion += 10
-            breakdown.append({"factor": "粗利率", "points": 10, "status": "yellow",
-                               "detail": f"{round(gross_margin*100,1)}% — やや低水準。競合圧力が徐々に拡大している可能性。"})
+        if not has_data:
+            logger.warning("%s: 財務データ取得不可 — 侵食度を算出しない", ticker)
         else:
-            breakdown.append({"factor": "粗利率", "points": 0, "status": "green",
-                               "detail": f"{round(gross_margin*100,1)}% — 高い参入障壁を維持。価格支配力あり。"})
+            erosion = 0
 
-        if rev_growth < -0.05:
-            erosion += 25
-            breakdown.append({"factor": "売上成長", "points": 25, "status": "red",
-                               "detail": f"{round(rev_growth*100,1)}% — 市場シェア喪失か需要縮小。堀が崩れている可能性が高い。"})
-        elif rev_growth < 0.05:
-            erosion += 10
-            breakdown.append({"factor": "売上成長", "points": 10, "status": "yellow",
-                               "detail": f"{round(rev_growth*100,1)}% — 成長鈍化。競合の追い上げに注意。"})
-        else:
-            breakdown.append({"factor": "売上成長", "points": 0, "status": "green",
-                               "detail": f"+{round(rev_growth*100,1)}% — 成長継続。堀が拡大中。"})
+        if has_data:
+            if gm < 0.2:
+                erosion += 20
+                breakdown.append({"factor": "粗利率", "points": 20, "status": "red",
+                                   "detail": f"{round(gm*100,1)}% — 参入障壁が低い可能性。競合に価格競争で負けるリスク。"})
+            elif gm < 0.4:
+                erosion += 10
+                breakdown.append({"factor": "粗利率", "points": 10, "status": "yellow",
+                                   "detail": f"{round(gm*100,1)}% — やや低水準。競合圧力が徐々に拡大している可能性。"})
+            else:
+                breakdown.append({"factor": "粗利率", "points": 0, "status": "green",
+                                   "detail": f"{round(gm*100,1)}% — 高い参入障壁を維持。価格支配力あり。"})
 
-        if op_margin < -0.2:
-            erosion += 20
-            breakdown.append({"factor": "営業利益率", "points": 20, "status": "red",
-                               "detail": f"{round(op_margin*100,1)}% — 収益性に深刻な問題。資金調達リスクあり。"})
-        elif op_margin < 0:
-            erosion += 10
-            breakdown.append({"factor": "営業利益率", "points": 10, "status": "yellow",
-                               "detail": f"{round(op_margin*100,1)}% — 赤字体質。収益化の目処を確認すべき。"})
-        else:
-            breakdown.append({"factor": "営業利益率", "points": 0, "status": "green",
-                               "detail": f"{round(op_margin*100,1)}% — 収益性良好。自己資金でシェア拡大が可能。"})
+            if rg < -0.05:
+                erosion += 25
+                breakdown.append({"factor": "売上成長", "points": 25, "status": "red",
+                                   "detail": f"{round(rg*100,1)}% — 市場シェア喪失か需要縮小。堀が崩れている可能性が高い。"})
+            elif rg < 0.05:
+                erosion += 10
+                breakdown.append({"factor": "売上成長", "points": 10, "status": "yellow",
+                                   "detail": f"{round(rg*100,1)}% — 成長鈍化。競合の追い上げに注意。"})
+            else:
+                breakdown.append({"factor": "売上成長", "points": 0, "status": "green",
+                                   "detail": f"+{round(rg*100,1)}% — 成長継続。堀が拡大中。"})
 
-        if rec >= 3.5:
-            erosion += 20
-            breakdown.append({"factor": "アナリスト評価", "points": 20, "status": "red",
-                               "detail": f"{round(rec,1)} / 5.0 — 売り推奨寄り。機関投資家がネガティブに転じている可能性。"})
-        elif rec >= 2.5:
-            erosion += 5
-            breakdown.append({"factor": "アナリスト評価", "points": 5, "status": "yellow",
-                               "detail": f"{round(rec,1)} / 5.0 — 中立。見通しが割れている状態。"})
-        else:
-            breakdown.append({"factor": "アナリスト評価", "points": 0, "status": "green",
-                               "detail": f"{round(rec,1)} / 5.0 — 買い推奨多数。プロが堀の持続性を評価。"})
+            if om < -0.2:
+                erosion += 20
+                breakdown.append({"factor": "営業利益率", "points": 20, "status": "red",
+                                   "detail": f"{round(om*100,1)}% — 収益性に深刻な問題。資金調達リスクあり。"})
+            elif om < 0:
+                erosion += 10
+                breakdown.append({"factor": "営業利益率", "points": 10, "status": "yellow",
+                                   "detail": f"{round(om*100,1)}% — 赤字体質。収益化の目処を確認すべき。"})
+            else:
+                breakdown.append({"factor": "営業利益率", "points": 0, "status": "green",
+                                   "detail": f"{round(om*100,1)}% — 収益性良好。自己資金でシェア拡大が可能。"})
 
-        if short_pct > 0.2:
-            erosion += 15
-            breakdown.append({"factor": "空売り比率", "points": 15, "status": "red",
-                               "detail": f"{round(short_pct*100,1)}% — 機関の売り圧力が強い。悪材料が先に織り込まれるリスク。"})
-        elif short_pct > 0.1:
-            erosion += 5
-            breakdown.append({"factor": "空売り比率", "points": 5, "status": "yellow",
-                               "detail": f"{round(short_pct*100,1)}% — やや注意。ネガティブな見方が増えつつある。"})
-        else:
-            breakdown.append({"factor": "空売り比率", "points": 0, "status": "green",
-                               "detail": f"{round(short_pct*100,1)}% — 正常範囲。弱気筋の圧力は限定的。"})
+            if rc >= 3.5:
+                erosion += 20
+                breakdown.append({"factor": "アナリスト評価", "points": 20, "status": "red",
+                                   "detail": f"{round(rc,1)} / 5.0 — 売り推奨寄り。機関投資家がネガティブに転じている可能性。"})
+            elif rc >= 2.5:
+                erosion += 5
+                breakdown.append({"factor": "アナリスト評価", "points": 5, "status": "yellow",
+                                   "detail": f"{round(rc,1)} / 5.0 — 中立。見通しが割れている状態。"})
+            else:
+                breakdown.append({"factor": "アナリスト評価", "points": 0, "status": "green",
+                                   "detail": f"{round(rc,1)} / 5.0 — 買い推奨多数。プロが堀の持続性を評価。"})
 
-        erosion = min(100, erosion)
-        alert = "red" if erosion >= 60 else "yellow" if erosion >= 30 else "green"
+            if sp > 0.2:
+                erosion += 15
+                breakdown.append({"factor": "空売り比率", "points": 15, "status": "red",
+                                   "detail": f"{round(sp*100,1)}% — 機関の売り圧力が強い。悪材料が先に織り込まれるリスク。"})
+            elif sp > 0.1:
+                erosion += 5
+                breakdown.append({"factor": "空売り比率", "points": 5, "status": "yellow",
+                                   "detail": f"{round(sp*100,1)}% — やや注意。ネガティブな見方が増えつつある。"})
+            else:
+                breakdown.append({"factor": "空売り比率", "points": 0, "status": "green",
+                                   "detail": f"{round(sp*100,1)}% — 正常範囲。弱気筋の圧力は限定的。"})
+
+            erosion = min(100, erosion)
+
+        alert = ("red" if (erosion or 0) >= 60
+                 else "yellow" if (erosion or 0) >= 30 or not has_data
+                 else "green")
 
         # ニュース複数件取得 + 会社名フィルタ + 日本語翻訳
         news_items = []
@@ -390,16 +409,17 @@ async def get_moat(ticker: str):
             "moat":      moat_fallback,
             "alert":     alert,
             "erosion":   erosion,
+            "hasData":   has_data,
             "news":      news_items[0]["title"] if news_items else "",
             "newsItems": news_items,
             "breakdown": breakdown,
             "metrics": {
-                "grossMargin":     round(gross_margin * 100, 1) if gross_margin else None,
-                "revenueGrowth":   round(rev_growth   * 100, 1) if rev_growth   else None,
-                "operatingMargin": round(op_margin    * 100, 1) if op_margin    else None,
-                "recommendation":  round(rec, 1),
-                "shortPct":        round(short_pct    * 100, 1) if short_pct    else None,
-                "roe":             round(roe           * 100, 1) if roe          else None,
+                "grossMargin":     round(gm  * 100, 1) if gross_margin is not None else None,
+                "revenueGrowth":   round(rg  * 100, 1) if rev_growth   is not None else None,
+                "operatingMargin": round(om  * 100, 1) if op_margin    is not None else None,
+                "recommendation":  round(rc, 1)        if rec          is not None else None,
+                "shortPct":        round(sp  * 100, 1) if short_pct    is not None else None,
+                "roe":             round(float(roe or 0) * 100, 1) if roe is not None else None,
             },
         }
         _MOAT_CACHE[ticker] = (data, time.monotonic())

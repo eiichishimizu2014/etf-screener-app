@@ -298,29 +298,36 @@ function WatchDetail({ item, onBack, onRemove }) {
 }
 
 function MoatCard({ item }) {
-  const loading = item.erosion == null;
-  const erosion = item.erosion ?? 0;
-  const m = item.metrics || {};
+  const fetching = item.erosion == null && item.hasData == null;  // まだAPI未応答
+  const noData   = item.hasData === false;                        // API応答済みだが財務データなし
+  const erosion  = item.erosion ?? 0;
+  const m        = item.metrics || {};
   return (
     <div style={{
       background: "#fff", borderRadius: 14, padding: "14px 16px",
       marginBottom: 10, boxShadow: "0 1px 8px #0001",
-      borderLeft: `4px solid ${alertColor[item.alert]}`
+      borderLeft: `4px solid ${alertColor[item.alert] ?? "#94a3b8"}`
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <span style={{ fontWeight: 800, fontSize: 15 }}>{item.ticker}</span>
           <span style={{ fontSize: 12, color: "#888", marginLeft: 6 }}>{item.name}</span>
         </div>
-        {loading
-          ? <span style={{ fontSize: 13, color: "#94a3b8" }}>⏳</span>
+        {fetching ? <span style={{ fontSize: 13, color: "#94a3b8" }}>⏳</span>
+          : noData  ? <span style={{ fontSize: 13, color: "#94a3b8" }}>－</span>
           : <span style={{ fontSize: 18 }}>{item.alert === "green" ? "🟢" : item.alert === "yellow" ? "🟡" : "🔴"}</span>
         }
       </div>
       <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>堀: {item.moat}</div>
 
+      {noData && (
+        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6, background: "#f8fafc", borderRadius: 8, padding: "6px 10px" }}>
+          ⚠️ 財務データを取得できませんでした（ニュースのみ表示）
+        </div>
+      )}
+
       {/* ファンダメンタルズ指標 */}
-      {!loading && (
+      {!fetching && !noData && (
         <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
           {m.grossMargin != null && (
             <span style={{ fontSize: 11, color: "#64748b" }}>粗利率 <strong style={{ color: m.grossMargin > 40 ? "#22c55e" : "#ef4444" }}>{m.grossMargin}%</strong></span>
@@ -337,24 +344,27 @@ function MoatCard({ item }) {
         </div>
       )}
 
-      <div style={{ marginTop: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginBottom: 3 }}>
-          <span>堀の侵食度</span>
-          {!loading && <span style={{ fontWeight: 700, color: erosion > 60 ? "#ef4444" : erosion > 30 ? "#f59e0b" : "#22c55e" }}>{erosion}点</span>}
+      {!fetching && !noData && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginBottom: 3 }}>
+            <span>堀の侵食度</span>
+            <span style={{ fontWeight: 700, color: erosion > 60 ? "#ef4444" : erosion > 30 ? "#f59e0b" : "#22c55e" }}>{erosion}点</span>
+          </div>
+          <div style={{ background: "#f0f0f0", borderRadius: 4, height: 6, overflow: "hidden" }}>
+            <div style={{ height: "100%", borderRadius: 4, width: `${erosion}%`, background: erosion > 60 ? "#ef4444" : erosion > 30 ? "#f59e0b" : "#22c55e" }} />
+          </div>
         </div>
-        <div style={{ background: "#f0f0f0", borderRadius: 4, height: 6, overflow: "hidden" }}>
-          {!loading && <div style={{ height: "100%", borderRadius: 4, width: `${erosion}%`, background: erosion > 60 ? "#ef4444" : erosion > 30 ? "#f59e0b" : "#22c55e" }} />}
-        </div>
-      </div>
+      )}
       {item.news ? <div style={{ fontSize: 11, color: "#555", marginTop: 8, lineHeight: 1.5 }}>📰 {item.news}</div>
-                 : loading ? <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8 }}>ニュース取得中...</div>
+                 : fetching ? <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8 }}>ニュース取得中...</div>
                  : null}
     </div>
   );
 }
 
 function MoatDetail({ item, onBack }) {
-  const loading = item.erosion == null;
+  const loading = item.erosion == null && item.hasData == null;
+  const noData  = item.hasData === false;
   const erosion = item.erosion ?? 0;
   const m = item.metrics || {};
   const breakdown = item.breakdown || [];
@@ -392,8 +402,18 @@ function MoatDetail({ item, onBack }) {
         </div>
       </div>
 
+      {/* 財務データ取得不可バナー */}
+      {noData && (
+        <div style={{ background: "#f1f5f9", borderRadius: 12, padding: "12px 16px", marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#64748b" }}>⚠️ 財務データを取得できませんでした</div>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
+            Yahoo Finance の財務 API が一時的に利用不可です。ニュースは引き続き確認できます。
+          </div>
+        </div>
+      )}
+
       {/* 中期判断バナー */}
-      {!loading && (
+      {!loading && !noData && (
         <div style={{ background: verdict.bg, borderRadius: 12, padding: "12px 16px", marginBottom: 10 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 }}>中期保有判断</div>
           <div style={{ fontSize: 17, fontWeight: 800, color: verdict.color, marginTop: 4 }}>{verdict.label}</div>
@@ -411,7 +431,7 @@ function MoatDetail({ item, onBack }) {
       )}
 
       {/* 侵食度 内訳 */}
-      {breakdown.length > 0 && (
+      {!noData && breakdown.length > 0 && (
         <div style={{ background: "#fff", borderRadius: 14, padding: "14px 16px", marginBottom: 10, boxShadow: "0 1px 8px #0001" }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 10 }}>📊 侵食度の内訳</div>
           {breakdown.map((b, i) => (
@@ -434,7 +454,7 @@ function MoatDetail({ item, onBack }) {
       )}
 
       {/* ファンダメンタルズ指標 */}
-      {!loading && (
+      {!loading && !noData && (
         <div style={{ background: "#fff", borderRadius: 14, padding: "14px 16px", marginBottom: 10, boxShadow: "0 1px 8px #0001" }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 10 }}>📈 主要指標</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
