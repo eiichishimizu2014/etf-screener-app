@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import requests as _requests
 import uvicorn
 import yfinance as yf
 from deep_translator import GoogleTranslator
@@ -33,6 +34,86 @@ _CACHE_TTL = 300
 
 _MOAT_CACHE: dict[str, tuple[dict, float]] = {}
 _MOAT_TTL = 3600
+
+
+# ── Yahoo Finance 直接 HTTP（crumb ベース）────────────────────────────
+_YF_SESSION: _requests.Session | None = None
+_YF_CRUMB: str | None = None
+_YF_SESSION_TS: float = 0.0
+_YF_SESSION_TTL: float = 1800.0   # 30分ごとに crumb を再取得
+
+
+def _ensure_yf_session() -> tuple[_requests.Session, str | None]:
+    """Yahoo Finance の crumb + Cookie を取得してキャッシュする。"""
+    global _YF_SESSION, _YF_CRUMB, _YF_SESSION_TS
+    if _YF_SESSION and _YF_CRUMB and time.monotonic() - _YF_SESSION_TS < _YF_SESSION_TTL:
+        return _YF_SESSION, _YF_CRUMB
+
+    s = _requests.Session()
+    s.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    crumb = None
+    try:
+        s.get("https://finance.yahoo.com/", timeout=10)
+        r = s.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10)
+        if r.status_code == 200 and r.text.strip():
+            crumb = r.text.strip()
+            logger.info("Yahoo Finance crumb 取得成功: %s…", crumb[:8])
+        else:
+            logger.warning("crumb 取得失敗: status=%s body=%r", r.status_code, r.text[:60])
+    except Exception as e:
+        logger.warning("Yahoo Finance セッション初期化失敗: %s", e)
+
+    _YF_SESSION, _YF_CRUMB, _YF_SESSION_TS = s, crumb, time.monotonic()
+    return s, crumb
+
+
+def _fetch_fundamentals(ticker: str) -> dict:
+    """quoteSummary を直接 HTTP で取得（yfinance の session 問題を回避）。"""
+    s, crumb = _ensure_yf_session()
+    if not crumb:
+        return {}
+    try:
+        url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}"
+        r = s.get(url, params={
+            "modules": "financialData,defaultKeyStatistics,assetProfile",
+            "crumb": crumb,
+        }, timeout=15)
+        if r.status_code != 200:
+            logger.warning("%s: quoteSummary status=%s", ticker, r.status_code)
+            return {}
+        res = (r.json().get("quoteSummary") or {}).get("result") or []
+        if not res:
+            return {}
+        fd = res[0].get("financialData") or {}
+        ks = res[0].get("defaultKeyStatistics") or {}
+        ap = res[0].get("assetProfile") or {}
+
+        def _raw(d: dict, k: str):
+            v = d.get(k)
+            return v.get("raw") if isinstance(v, dict) else v
+
+        return {
+            "grossMargins":        _raw(fd, "grossMargins"),
+            "revenueGrowth":       _raw(fd, "revenueGrowth"),
+            "operatingMargins":    _raw(fd, "operatingMargins"),
+            "recommendationMean":  _raw(fd, "recommendationMean"),
+            "shortPercentOfFloat": _raw(ks, "shortPercentOfFloat"),
+            "returnOnEquity":      _raw(fd, "returnOnEquity"),
+            "longName":            ap.get("longName"),
+            "shortName":           ap.get("shortName"),
+            "industry":            ap.get("industry"),
+            "sector":              ap.get("sector"),
+        }
+    except Exception as e:
+        logger.warning("%s: _fetch_fundamentals 失敗: %s", ticker, e)
+        return {}
 
 
 def _translate_ja(text: str) -> str:
@@ -170,14 +251,23 @@ async def get_moat(ticker: str):
     try:
         t = yf.Ticker(ticker)
 
-        # ── Step1: t.info（基本情報 + 財務指標）────────────────────────
+        # ── Step1: yfinance t.info ────────────────────────────────────
         info: dict = {}
         try:
             raw = t.get_info() if hasattr(t, "get_info") else t.info
-            if isinstance(raw, dict):
+            if isinstance(raw, dict) and raw.get("grossMargins") is not None:
                 info = raw
+                logger.info("%s: t.info 成功", ticker)
         except Exception as e:
-            logger.warning("%s: info 取得失敗 (%s)", ticker, e)
+            logger.warning("%s: t.info 失敗 (%s)", ticker, e)
+
+        # ── Step2: info に財務データがなければ直接 HTTP で取得 ───────────
+        if not info.get("grossMargins") and not info.get("revenueGrowth"):
+            logger.info("%s: info 空 → _fetch_fundamentals にフォールバック", ticker)
+            direct = _fetch_fundamentals(ticker)
+            if direct.get("grossMargins") is not None:
+                info = direct
+                logger.info("%s: _fetch_fundamentals 成功", ticker)
 
         gross_margin = float(info.get("grossMargins")        or 0)
         rev_growth   = float(info.get("revenueGrowth")       or 0)
@@ -185,32 +275,6 @@ async def get_moat(ticker: str):
         rec          = float(info.get("recommendationMean")  or 0) or 3.0
         short_pct    = float(info.get("shortPercentOfFloat") or 0)
         roe          = float(info.get("returnOnEquity")      or 0)
-
-        # ── Step2: info に財務指標がなければ income_stmt で補完 ──────────
-        if not gross_margin and not rev_growth and not op_margin:
-            logger.info("%s: info に財務データなし → income_stmt にフォールバック", ticker)
-            try:
-                stmt = (t.get_income_stmt()
-                        if hasattr(t, "get_income_stmt") else t.income_stmt)
-                if stmt is not None and not stmt.empty and len(stmt.columns) >= 1:
-                    c0 = stmt.columns[0]
-                    c1 = stmt.columns[1] if len(stmt.columns) >= 2 else c0
-
-                    def _v(row: str, col=c0):
-                        return float(stmt.loc[row, col]) if row in stmt.index else None
-
-                    rev0 = _v("Total Revenue")
-                    rev1 = _v("Total Revenue", c1)
-                    gp   = _v("Gross Profit")
-                    oi   = _v("Operating Income")
-
-                    if rev0 and rev0 != 0:
-                        if gp  is not None: gross_margin = gp  / rev0
-                        if oi  is not None: op_margin    = oi  / rev0
-                        if rev1 and rev1 != 0:
-                            rev_growth = (rev0 - rev1) / abs(rev1)
-            except Exception as e:
-                logger.warning("%s: income_stmt 取得失敗 (%s)", ticker, e)
 
         # 侵食度スコア (0–100) + 内訳
         erosion = 0
